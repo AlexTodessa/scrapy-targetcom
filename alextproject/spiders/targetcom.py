@@ -6,13 +6,17 @@ import re
 class TargetcomSpider(scrapy.Spider):
     name = 'targetcom'
     allowed_domains = ['target.com']
-    start_urls = ['https://www.target.com/']
+    start_urls = None
+    product_url = ''
 
-    def __init__(self, url='', **kwargs):
-        self.start_urls = [url]
+    def __init__(self, *args, **kwargs):
+        self.product_url = kwargs.get('url')
         super().__init__(**kwargs)
+        
+    def start_requests(self):
+        yield scrapy.Request(self.product_url, callback=self.parse_product)
 
-    def parse(self, response):        
+    def parse_product(self, response):        
         
         
         jsonld = json.loads(response.selector.css('script[type="application/ld+json"]::text').get())
@@ -33,7 +37,7 @@ class TargetcomSpider(scrapy.Spider):
         return [scrapy.Request(pdp_url, callback=self.parse_pricing, cb_kwargs=dict(
             main_url = response.url, product_response = response, jsonld = jsonld
         ))]
-        
+    
     def parse_pricing(self, response, main_url, jsonld, product_response):
         
         data = json.loads(response.text);
