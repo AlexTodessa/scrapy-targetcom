@@ -49,11 +49,15 @@ class TargetcomSpider(scrapy.Spider):
             b = re.match(r'<B>(.*?)\:</B> (.*)', bullet)
             bulletsList[b.group(1)] = b.group(2)
             
+        price = jmespath.search('data.product.price.current_retail', data)
+        if (price == None):
+            price = jmespath.search('data.product.price.current_retail_min', data)
+            
         return {
                 'url': main_url,
                 'tcin': jmespath.search('"@graph"[0].sku', jsonld),
                 'upc': jmespath.search('"@graph"[0].gtin13', jsonld),
-                'price': jmespath.search('data.product.price.current_retail_min', data),
+                'price': price,
                 'currency': jmespath.search('"@graph"[0].offers.priceCurrency', jsonld),
                 'title': product_response.selector.css('h1[itemprop="name"] span::text').get(),
                 'description': jmespath.search('"@graph"[0].description', jsonld),
