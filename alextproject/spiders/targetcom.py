@@ -1,7 +1,6 @@
 import scrapy
+import jmespath
 import json
-import urllib
-from w3lib.html import remove_tags
 import re
 
 class TargetcomSpider(scrapy.Spider):
@@ -9,52 +8,50 @@ class TargetcomSpider(scrapy.Spider):
     allowed_domains = ['target.com']
     start_urls = ['https://www.target.com/']
 
+    def __init__(self, url='', **kwargs):
+        self.start_urls = [url]
+        super().__init__(**kwargs)
+
     def parse(self, response):        
         
         
         jsonld = json.loads(response.selector.css('script[type="application/ld+json"]::text').get())
-        tcin = remove_tags(jsonld["@graph"][0]["sku"])
-        upc = remove_tags(jsonld["@graph"][0]["gtin13"])
         
-        apiKey = re.search(r'\"apiKey\"\:\"(.*?)\"', response.text).group(1)
-        pricingStoreId = re.search(r'\"pricing_store_id\"\:\"(\d+)\"', response.text).group(1)
+        tcin = jmespath.search('"@graph"[0].sku', jsonld)
+        
+        api_key = re.search(r'\"apiKey\"\:\"(.*?)\"', response.text).group(1)
+        pricing_store_id = re.search(r'\"pricing_store_id\"\:\"(\d+)\"', response.text).group(1)
         
 
-        pdpUrl = f'https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1?key={apiKey}&tcin={tcin}'
-        pdpUrl = pdpUrl + f'&store_id=none&has_store_id=false&pricing_store_id={pricingStoreId}'
-        pdpUrl = pdpUrl + '&scheduled_delivery_store_id=none&has_scheduled_delivery_store_id=false'
-        pdpUrl = pdpUrl + '&has_financing_options=false'
+        pdp_url = (
+            f'https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1?key={api_key}&tcin={tcin}'
+            f'&store_id=none&has_store_id=false&pricing_store_id={pricing_store_id}'
+            '&scheduled_delivery_store_id=none&has_scheduled_delivery_store_id=false'
+            '&has_financing_options=false'
+            )
         
+        return [scrapy.Request(pdp_url, callback=self.parse_pricing, cb_kwargs=dict(
+            main_url = response.url, product_response = response, jsonld = jsonld
+        ))]
         
-        with urllib.request.urlopen(pdpUrl) as url:
-            data = json.loads(url.read().decode())
+    def parse_pricing(self, response, main_url, jsonld, product_response):
         
-        price = data["data"]["product"]["price"]["current_retail_min"]
+        data = json.loads(response.text);
         
-        bullets = data["data"]["product"]["item"]["product_description"]["bullet_descriptions"]
-        
+        bullets = jmespath.search('data.product.item.product_description.bullet_descriptions', data)
         bulletsList = {}
+        
         for bullet in bullets:
             b = re.match(r'<B>(.*?)\:</B> (.*)', bullet)
             bulletsList[b.group(1)] = b.group(2)
-        
-        #https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1
-        #?key=ff457966e64d5e877fdbad070f276d18ecec4a01
-        #&tcin=81204099
-        #&store_id=none
-        #&has_store_id=false
-        #&pricing_store_id=3991
-        #&scheduled_delivery_store_id=none
-        #&has_scheduled_delivery_store_id=false
-        #&has_financing_options=false
-        
+            
         return {
-                'url': response.url,
-                'title': response.selector.css('h1[itemprop="name"] span::text').get(),                
-                'description': remove_tags(jsonld["@graph"][0]["description"]),
-                'tcin': tcin,
-                'upc': upc,
-                'price': price,
-                'currency': remove_tags(jsonld["@graph"][0]["offers"]["priceCurrency"]),
+                'url': main_url,
+                'tcin': jmespath.search('"@graph"[0].sku', jsonld),
+                'upc': jmespath.search('"@graph"[0].gtin13', jsonld),
+                'price': jmespath.search('data.product.price.current_retail_min', data),
+                'currency': jmespath.search('"@graph"[0].offers.priceCurrency', jsonld),
+                'title': product_response.selector.css('h1[itemprop="name"] span::text').get(),
+                'description': jmespath.search('"@graph"[0].description', jsonld),
                 'specs': bulletsList
             }
